@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Project, Resource, Assignments, ResourceType } from '../types';
 import DraggableResource from './DraggableResource';
 
@@ -144,6 +144,8 @@ interface ProjectBoardProps {
 }
 
 const ProjectBoard: React.FC<ProjectBoardProps> = ({ projects, programmers, qas, projectManagers, projectLeads, assignments, onDrop, resourceProjectCounts }) => {
+  const [searchTerm, setSearchTerm] = useState('');
+
   const resourceMap = new Map<string, Resource>([
     ...programmers.map((p): [string, Resource] => [p.id, p]),
     ...qas.map((q): [string, Resource] => [q.id, q]),
@@ -151,12 +153,38 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({ projects, programmers, qas,
     ...projectLeads.map((pl): [string, Resource] => [pl.id, pl]),
   ]);
 
+  const filteredProjects = useMemo(() => {
+    if (!searchTerm) {
+      return projects;
+    }
+    return projects.filter(project =>
+      project.name.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [projects, searchTerm]);
+
   return (
     <section className="flex-1">
-      <h2 className="text-2xl font-bold mb-6 text-center text-gray-300">Projects</h2>
+      <h2 className="text-2xl font-bold mb-4 text-center text-gray-300">Projects</h2>
+      
+      <div className="mb-6 relative">
+        <input
+          type="text"
+          placeholder="Search projects..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full bg-gray-700 text-white placeholder-gray-400 border border-gray-600 rounded-lg py-2 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+          aria-label="Search projects"
+        />
+        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+          <svg className="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+          </svg>
+        </div>
+      </div>
+
       <div className="space-y-6">
-        {projects.length > 0 ? (
-          projects.map(project => {
+        {filteredProjects.length > 0 ? (
+          filteredProjects.map(project => {
             const projectAssignments = assignments[project.id];
             if (!projectAssignments) return null;
 
@@ -173,8 +201,12 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({ projects, programmers, qas,
           })
         ) : (
           <div className="text-center py-12 px-6 bg-gray-800 rounded-2xl shadow-lg border border-dashed border-gray-700">
-            <h3 className="text-xl font-semibold text-white">No Projects Loaded</h3>
-            <p className="mt-1 text-gray-400">Upload a projects CSV to start assigning resources.</p>
+            <h3 className="text-xl font-semibold text-white">
+              {projects.length > 0 ? 'No Projects Found' : 'No Projects Loaded'}
+            </h3>
+            <p className="mt-1 text-gray-400">
+              {projects.length > 0 ? 'Try a different search term.' : 'Upload a projects CSV to start assigning resources.'}
+            </p>
           </div>
         )}
       </div>
