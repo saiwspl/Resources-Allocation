@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
-import { Resource, Assignments, ResourceType } from '../types';
+import React, { useState, useMemo } from 'react';
+import { Resource, Assignments, ResourceType, Project } from '../types';
 import DraggableResource from './DraggableResource';
 
 interface ResourcePoolProps {
   programmers: Resource[];
   qas: Resource[];
   projectManagers: Resource[];
+  projectLeads: Resource[];
   assignments: Assignments;
-  onDrop: (targetProjectId: string | null, targetResourceType: ResourceType) => (e: React.DragEvent<HTMLDivElement>) => void;
+  onDrop: (target: { projectId: string | null; type: ResourceType }) => (e: React.DragEvent<HTMLDivElement>) => void;
+  resourceProjectCounts: Map<string, number>;
 }
 
 const DropZone: React.FC<{
@@ -16,7 +18,6 @@ const DropZone: React.FC<{
     children: React.ReactNode;
 }> = ({ resourceType, onDrop, children }) => {
     const [isOver, setIsOver] = useState(false);
-    const [justDropped, setJustDropped] = useState(false);
     
     const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault();
@@ -36,29 +37,26 @@ const DropZone: React.FC<{
         const draggedType = e.dataTransfer.getData('resourceType');
         if (draggedType === resourceType) {
             onDrop(e);
-            setJustDropped(true);
-            setTimeout(() => setJustDropped(false), 400); // Animation duration
         }
         setIsOver(false);
     };
     
-    const ringColor = resourceType === ResourceType.PROGRAMMER
-        ? 'ring-blue-500'
-        : resourceType === ResourceType.QA
-        ? 'ring-green-500'
-        : 'ring-purple-500';
+    const ringColor = {
+        [ResourceType.PROGRAMMER]: 'ring-blue-500',
+        [ResourceType.QA]: 'ring-green-500',
+        [ResourceType.PROJECT_MANAGER]: 'ring-purple-500',
+        [ResourceType.PROJECT_LEAD]: 'ring-yellow-500'
+    }[resourceType];
 
     return (
         <div
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
-            className={`p-4 rounded-xl min-h-[200px] transition-all duration-200 ${
+            className={`p-4 rounded-xl min-h-[150px] transition-all duration-200 space-y-2 ${
                 isOver
                 ? `ring-2 ring-offset-2 ring-offset-gray-800 ${ringColor} bg-gray-700/50`
                 : 'bg-gray-800/50'
-            } ${
-                justDropped ? 'bg-green-500/25' : ''
             }`}
         >
             {children}
@@ -66,19 +64,29 @@ const DropZone: React.FC<{
     );
 };
 
-const ResourcePool: React.FC<ResourcePoolProps> = ({ programmers, qas, projectManagers, assignments, onDrop }) => {
+const ResourcePool: React.FC<ResourcePoolProps> = ({ programmers, qas, projectManagers, projectLeads, assignments, onDrop, resourceProjectCounts }) => {
   const [searchTerm, setSearchTerm] = useState('');
 
-  const filterByName = (resource: Resource) => 
-    resource.name.toLowerCase().includes(searchTerm.toLowerCase());
+  const unassignedResources = useMemo(() => {
+    const assignedIds = new Set(
+        Object.values(assignments).flatMap(projectAssignments => 
+            Object.values(projectAssignments).flat()
+        )
+    );
+    
+    const filterByName = (r: Resource) => r.name.toLowerCase().includes(searchTerm.toLowerCase());
 
-  const allProgrammers = programmers.filter(filterByName);
-  const allQas = qas.filter(filterByName);
-  const allPms = projectManagers.filter(filterByName);
+    return {
+      programmers: programmers.filter(r => !assignedIds.has(r.id) && filterByName(r)),
+      qas: qas.filter(r => !assignedIds.has(r.id) && filterByName(r)),
+      projectManagers: projectManagers.filter(r => !assignedIds.has(r.id) && filterByName(r)),
+      projectLeads: projectLeads.filter(r => !assignedIds.has(r.id) && filterByName(r)),
+    };
+  }, [programmers, qas, projectManagers, projectLeads, assignments, searchTerm]);
 
   return (
-    <aside className="lg:w-1/4 w-full bg-gray-800 p-6 rounded-2xl shadow-lg border border-gray-700">
-      <h2 className="text-2xl font-bold mb-4 text-center text-gray-300">Resource Pool</h2>
+    <aside className="lg:w-1/3 w-full bg-gray-800 p-6 rounded-2xl shadow-lg border border-gray-700">
+      <h2 className="text-2xl font-bold mb-4 text-center text-gray-300">Unassigned Resources</h2>
       
       <div className="mb-6 relative">
         <input
@@ -98,45 +106,27 @@ const ResourcePool: React.FC<ResourcePoolProps> = ({ programmers, qas, projectMa
 
       <div className="space-y-6">
         <div>
-          <h3 className="text-lg font-semibold mb-3 text-blue-400">Programmers ({programmers.length})</h3>
-          <DropZone resourceType={ResourceType.PROGRAMMER} onDrop={onDrop(null, ResourceType.PROGRAMMER)}>
-            {allProgrammers.length > 0 ? (
-                allProgrammers.map(p => (
-                <DraggableResource key={p.id} resource={p} type={ResourceType.PROGRAMMER} sourceProjectId={null} />
-                ))
-            ) : (
-                <p className="text-gray-500 text-center pt-8">
-                  {searchTerm ? 'No matches found.' : 'No programmers available.'}
-                </p>
-            )}
+          <h3 className="text-lg font-semibold mb-3 text-purple-400">Project Managers ({unassignedResources.projectManagers.length})</h3>
+          <DropZone resourceType={ResourceType.PROJECT_MANAGER} onDrop={onDrop({ projectId: null, type: ResourceType.PROJECT_MANAGER })}>
+             {unassignedResources.projectManagers.map(p => <DraggableResource key={p.id} resource={p} type={ResourceType.PROJECT_MANAGER} sourceProjectId={null} projectCount={resourceProjectCounts.get(p.id) || 0} />)}
           </DropZone>
         </div>
         <div>
-          <h3 className="text-lg font-semibold mb-3 text-green-400">QA Engineers ({qas.length})</h3>
-          <DropZone resourceType={ResourceType.QA} onDrop={onDrop(null, ResourceType.QA)}>
-            {allQas.length > 0 ? (
-                allQas.map(q => (
-                <DraggableResource key={q.id} resource={q} type={ResourceType.QA} sourceProjectId={null} />
-                ))
-            ) : (
-                 <p className="text-gray-500 text-center pt-8">
-                   {searchTerm ? 'No matches found.' : 'No QA engineers available.'}
-                 </p>
-            )}
+          <h3 className="text-lg font-semibold mb-3 text-yellow-400">Project Leads ({unassignedResources.projectLeads.length})</h3>
+          <DropZone resourceType={ResourceType.PROJECT_LEAD} onDrop={onDrop({ projectId: null, type: ResourceType.PROJECT_LEAD })}>
+             {unassignedResources.projectLeads.map(p => <DraggableResource key={p.id} resource={p} type={ResourceType.PROJECT_LEAD} sourceProjectId={null} projectCount={resourceProjectCounts.get(p.id) || 0} />)}
           </DropZone>
         </div>
         <div>
-          <h3 className="text-lg font-semibold mb-3 text-purple-400">Project Managers ({projectManagers.length})</h3>
-          <DropZone resourceType={ResourceType.PROJECT_MANAGER} onDrop={onDrop(null, ResourceType.PROJECT_MANAGER)}>
-            {allPms.length > 0 ? (
-                allPms.map(p => (
-                <DraggableResource key={p.id} resource={p} type={ResourceType.PROJECT_MANAGER} sourceProjectId={null} />
-                ))
-            ) : (
-                 <p className="text-gray-500 text-center pt-8">
-                   {searchTerm ? 'No matches found.' : 'No project managers available.'}
-                 </p>
-            )}
+          <h3 className="text-lg font-semibold mb-3 text-blue-400">Programmers ({unassignedResources.programmers.length})</h3>
+          <DropZone resourceType={ResourceType.PROGRAMMER} onDrop={onDrop({ projectId: null, type: ResourceType.PROGRAMMER })}>
+            {unassignedResources.programmers.map(p => <DraggableResource key={p.id} resource={p} type={ResourceType.PROGRAMMER} sourceProjectId={null} projectCount={resourceProjectCounts.get(p.id) || 0} />)}
+          </DropZone>
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold mb-3 text-green-400">QA Engineers ({unassignedResources.qas.length})</h3>
+          <DropZone resourceType={ResourceType.QA} onDrop={onDrop({ projectId: null, type: ResourceType.QA })}>
+            {unassignedResources.qas.map(q => <DraggableResource key={q.id} resource={q} type={ResourceType.QA} sourceProjectId={null} projectCount={resourceProjectCounts.get(q.id) || 0} />)}
           </DropZone>
         </div>
       </div>

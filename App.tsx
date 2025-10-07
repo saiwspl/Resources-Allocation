@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { Resource, Project, Assignments, ResourceType } from './types';
 import FileUpload from './components/FileUpload';
 import ResourcePool from './components/ResourcePool';
@@ -13,6 +13,7 @@ const App: React.FC = () => {
   const [programmers, setProgrammers] = useState<Resource[]>([]);
   const [qas, setQas] = useState<Resource[]>([]);
   const [projectManagers, setProjectManagers] = useState<Resource[]>([]);
+  const [projectLeads, setProjectLeads] = useState<Resource[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [assignments, setAssignments] = useState<Assignments>({});
 
@@ -20,64 +21,97 @@ const App: React.FC = () => {
 
   const handleFileUpload = (content: string) => {
     try {
-      const lines = content.trim().split('\n');
+      const lines = content.trim().split('\n').filter(line => line.trim());
       const headerLine = lines.shift()?.trim().toLowerCase();
       if (!headerLine) throw new Error('CSV is empty or has no header.');
-
+      
       const header = headerLine.split(',').map(h => h.trim());
-      const requiredColumns = ['projects', 'programmers', 'qa', 'pm'];
-      if (!requiredColumns.every(col => header.includes(col))) {
-        throw new Error(`CSV must have the columns: ${requiredColumns.join(', ')}.`);
-      }
-
-      const projectIndex = header.indexOf('projects');
+      
       const programmerIndex = header.indexOf('programmers');
       const qaIndex = header.indexOf('qa');
       const pmIndex = header.indexOf('pm');
-      const leadIndex = header.indexOf('project_lead');
+      const leadIndex = header.indexOf('project_leads');
+      const projectIndex = header.indexOf('projects');
+      const assignedPmIndex = header.indexOf('project_manager');
+      const assignedLeadIndex = header.indexOf('project_lead');
 
+      // 1. Populate all resource pools
       const programmerNames = new Set<string>();
       const qaNames = new Set<string>();
       const pmNames = new Set<string>();
+      const leadNames = new Set<string>();
       
       lines.forEach(line => {
-        if (!line.trim()) return;
         const values = line.split(',');
-        if (values[programmerIndex]?.trim()) programmerNames.add(values[programmerIndex].trim());
-        if (values[qaIndex]?.trim()) qaNames.add(values[qaIndex].trim());
-        if (values[pmIndex]?.trim()) pmNames.add(values[pmIndex].trim());
+        if (programmerIndex > -1 && values[programmerIndex]?.trim()) programmerNames.add(values[programmerIndex].trim());
+        if (qaIndex > -1 && values[qaIndex]?.trim()) qaNames.add(values[qaIndex].trim());
+        if (pmIndex > -1 && values[pmIndex]?.trim()) pmNames.add(values[pmIndex].trim());
+        if (leadIndex > -1 && values[leadIndex]?.trim()) leadNames.add(values[leadIndex].trim());
+        if (assignedPmIndex > -1 && values[assignedPmIndex]?.trim()) pmNames.add(values[assignedPmIndex].trim());
+        if (assignedLeadIndex > -1 && values[assignedLeadIndex]?.trim()) leadNames.add(values[assignedLeadIndex].trim());
       });
 
       const newProgrammers = Array.from(programmerNames).map(name => ({ id: generateId(name), name }));
       const newQas = Array.from(qaNames).map(name => ({ id: generateId(name), name }));
       const newPms = Array.from(pmNames).map(name => ({ id: generateId(name), name }));
-      
-      const programmerNameToIdMap = new Map(newProgrammers.map(p => [p.name, p.id]));
-      
-      const newProjects: Project[] = [];
-      lines.forEach(line => {
-        if (!line.trim()) return;
-        const values = line.split(',');
-        const projectName = values[projectIndex]?.trim();
-        if (projectName) {
-          const leadName = leadIndex > -1 ? values[leadIndex]?.trim() : null;
-          const projectLeadId = leadName ? programmerNameToIdMap.get(leadName) || null : null;
-          newProjects.push({ id: generateId(projectName), name: projectName, projectLeadId });
-        }
-      });
+      const newLeads = Array.from(leadNames).map(name => ({ id: generateId(name), name }));
       
       setProgrammers(newProgrammers);
       setQas(newQas);
       setProjectManagers(newPms);
+      setProjectLeads(newLeads);
+
+      const allResources = [...newProgrammers, ...newQas, ...newPms, ...newLeads];
+      const resourceNameToIdMap = new Map(allResources.map(r => [r.name, r.id]));
+
+      // 2. Create projects
+      const newProjects: Project[] = [];
+      const projectSet = new Set<string>();
+      lines.forEach(line => {
+        const values = line.split(',');
+        const projectName = values[projectIndex]?.trim();
+        if (projectName && !projectSet.has(projectName)) {
+          newProjects.push({ id: generateId(projectName), name: projectName });
+          projectSet.add(projectName);
+        }
+      });
       setProjects(newProjects);
 
+      // 3. Create initial assignments for all resource types
       const initialAssignments: Assignments = {};
       newProjects.forEach(project => {
         initialAssignments[project.id] = {
           [ResourceType.PROGRAMMER]: [],
           [ResourceType.QA]: [],
           [ResourceType.PROJECT_MANAGER]: [],
+          [ResourceType.PROJECT_LEAD]: [],
         };
+      });
+
+      lines.forEach(line => {
+        const values = line.split(',');
+        const projectName = values[projectIndex]?.trim();
+        if (!projectName) return;
+
+        const projectId = generateId(projectName);
+        const programmerName = programmerIndex > -1 ? values[programmerIndex]?.trim() : null;
+        const qaName = qaIndex > -1 ? values[qaIndex]?.trim() : null;
+        const pmName = assignedPmIndex > -1 ? values[assignedPmIndex]?.trim() : null;
+        const leadName = assignedLeadIndex > -1 ? values[assignedLeadIndex]?.trim() : null;
+
+        const assignResource = (name: string | null, type: ResourceType) => {
+            if (name) {
+                const resourceId = resourceNameToIdMap.get(name);
+                if (resourceId && !initialAssignments[projectId][type].includes(resourceId)) {
+                    initialAssignments[projectId][type].push(resourceId);
+                }
+            }
+        };
+
+        assignResource(programmerName, ResourceType.PROGRAMMER);
+        assignResource(qaName, ResourceType.QA);
+        assignResource(pmName, ResourceType.PROJECT_MANAGER);
+        assignResource(leadName, ResourceType.PROJECT_LEAD);
       });
       setAssignments(initialAssignments);
 
@@ -88,8 +122,7 @@ const App: React.FC = () => {
   };
 
   const handleDrop = useCallback((
-    targetProjectId: string | null,
-    targetResourceType: ResourceType
+    target: { projectId: string | null; type: ResourceType }
   ) => {
     return (e: React.DragEvent<HTMLDivElement>) => {
       e.preventDefault();
@@ -98,32 +131,37 @@ const App: React.FC = () => {
       const sourceProjectId = e.dataTransfer.getData('sourceProjectId');
 
       if (!resourceId || !resourceTypeStr) return;
+      
       const resourceType = resourceTypeStr as ResourceType;
+      const targetResourceType = target.type;
 
+      // Ensure resource type matches the drop zone type
       if (resourceType !== targetResourceType) return;
 
       setAssignments(prev => {
-        const newAssignments = JSON.parse(JSON.stringify(prev));
-
-        // Dropping onto a project board adds the resource to that project.
-        if (targetProjectId) {
-          if (newAssignments[targetProjectId] && !newAssignments[targetProjectId][resourceType].includes(resourceId)) {
-            newAssignments[targetProjectId][resourceType].push(resourceId);
+        const newAssignments: Assignments = JSON.parse(JSON.stringify(prev));
+        
+        // Remove from source if it was a project
+        if (sourceProjectId && sourceProjectId !== 'unassigned') {
+          const sourceAssignments = newAssignments[sourceProjectId]?.[targetResourceType];
+          if (sourceAssignments) {
+            newAssignments[sourceProjectId][targetResourceType] = sourceAssignments.filter((id: string) => id !== resourceId);
           }
-        } 
-        // Dropping onto the resource pool from a project removes the resource from THAT project.
-        else if (sourceProjectId && sourceProjectId !== 'unassigned') {
-            if (newAssignments[sourceProjectId]) {
-                newAssignments[sourceProjectId][resourceType] = newAssignments[sourceProjectId][resourceType].filter((id: string) => id !== resourceId);
-            }
         }
         
+        // Add to target if it's a project
+        if (target.projectId) {
+          const targetAssignments = newAssignments[target.projectId]?.[targetResourceType];
+          if (targetAssignments && !targetAssignments.includes(resourceId)) {
+            targetAssignments.push(resourceId);
+          }
+        }
         return newAssignments;
       });
     };
   }, []);
 
-  const hasData = programmers.length > 0 || qas.length > 0 || projects.length > 0 || projectManagers.length > 0;
+  const hasData = programmers.length > 0 || qas.length > 0 || projects.length > 0 || projectManagers.length > 0 || projectLeads.length > 0;
 
   const handleSave = () => {
     if (!hasData) {
@@ -135,6 +173,7 @@ const App: React.FC = () => {
         programmers,
         qas,
         projectManagers,
+        projectLeads,
         projects,
         assignments,
       };
@@ -154,6 +193,7 @@ const App: React.FC = () => {
         setProgrammers(savedState.programmers || []);
         setQas(savedState.qas || []);
         setProjectManagers(savedState.projectManagers || []);
+        setProjectLeads(savedState.projectLeads || []);
         setProjects(savedState.projects || []);
         setAssignments(savedState.assignments || {});
         alert('State loaded successfully!');
@@ -166,22 +206,35 @@ const App: React.FC = () => {
     }
   };
 
-  const handleExportPDF = () => {
-    const resourceProjectCounts = new Map<string, number>();
+  const resourceProjectCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    const allResources = [...programmers, ...qas, ...projectManagers, ...projectLeads];
+    
+    // Initialize all resources with a count of 0
+    allResources.forEach(r => counts.set(r.id, 0));
 
+    // Count assignments for all resource types
+    Object.values(assignments).forEach(projectAssignments => {
+        (Object.values(projectAssignments) as string[][]).flat().forEach(resourceId => {
+            counts.set(resourceId, (counts.get(resourceId) || 0) + 1);
+        });
+    });
+    
+    return counts;
+  }, [programmers, qas, projectManagers, projectLeads, assignments]);
+
+
+  const handleExportPDF = () => {
     const allResourcesWithTypes = [
       ...programmers.map(r => ({ ...r, type: 'Programmer' as const })),
       ...qas.map(r => ({ ...r, type: 'QA Engineer' as const })),
       ...projectManagers.map(r => ({ ...r, type: 'Project Manager' as const })),
+      ...projectLeads.map(r => ({...r, type: 'Project Lead' as const })),
     ];
-
-    allResourcesWithTypes.forEach(r => resourceProjectCounts.set(r.id, 0));
-
-    Object.values(assignments).forEach(project => {
-      Object.values(project).flat().forEach(resourceId => {
-        resourceProjectCounts.set(resourceId, (resourceProjectCounts.get(resourceId) || 0) + 1);
-      });
-    });
+    
+    const resourceMap = new Map<string, Resource>(
+      allResourcesWithTypes.map((r): [string, Resource] => [r.id, { id: r.id, name: r.name }])
+    );
 
     const unassignedResources = allResourcesWithTypes.filter(r => (resourceProjectCounts.get(r.id) || 0) === 0);
 
@@ -189,17 +242,11 @@ const App: React.FC = () => {
       const proceed = window.confirm(
         `There are ${unassignedResources.length} completely unassigned resources. Do you still want to generate the PDF?`
       );
-      if (!proceed) {
-        return;
-      }
+      if (!proceed) return;
     }
 
     const { jsPDF } = jspdf;
     const doc = new jsPDF();
-    
-    const resourceMap = new Map<string, Resource>(
-        allResourcesWithTypes.map((r): [string, Resource] => [r.id, { id: r.id, name: r.name }])
-    );
     
     doc.setFontSize(18);
     doc.text('Project Resource Allocations', 14, 22);
@@ -210,11 +257,14 @@ const App: React.FC = () => {
         const projectAssignments = assignments[project.id];
         if (!projectAssignments) return;
 
-        const assignedPmResources = projectAssignments[ResourceType.PROJECT_MANAGER].map(id => resourceMap.get(id)).filter(Boolean) as Resource[];
-        const pmName = assignedPmResources.length > 0 ? assignedPmResources[0].name : 'N/A';
+        const getNames = (type: ResourceType) => 
+            projectAssignments[type]
+                .map(id => resourceMap.get(id)?.name)
+                .filter(Boolean)
+                .join(', ') || 'N/A';
 
-        const projectLead = project.projectLeadId ? resourceMap.get(project.projectLeadId) : null;
-        const leadName = projectLead ? projectLead.name : 'N/A';
+        const managerNames = getNames(ResourceType.PROJECT_MANAGER);
+        const leadNames = getNames(ResourceType.PROJECT_LEAD);
         
         const assignedProgrammerResources = projectAssignments[ResourceType.PROGRAMMER].map(id => resourceMap.get(id)).filter(Boolean) as Resource[];
         const assignedQaResources = projectAssignments[ResourceType.QA].map(id => resourceMap.get(id)).filter(Boolean) as Resource[];
@@ -231,18 +281,16 @@ const App: React.FC = () => {
 
         doc.setFontSize(11);
         doc.setTextColor(0, 0, 0);
-        doc.text(`Project Manager: ${pmName}`, 14, lastFinalY);
+        doc.text(`Project Manager(s): ${managerNames}`, 14, lastFinalY);
         lastFinalY += 6;
-        doc.text(`Project Lead: ${leadName}`, 14, lastFinalY);
+        doc.text(`Project Lead(s): ${leadNames}`, 14, lastFinalY);
         lastFinalY += 4;
 
         const tableBody = [];
         const maxRows = Math.max(assignedProgrammerResources.length, assignedQaResources.length);
 
         for (let i = 0; i < maxRows; i++) {
-            const programmer = assignedProgrammerResources[i]?.name || '';
-            const qa = assignedQaResources[i]?.name || '';
-            tableBody.push([programmer, qa]);
+            tableBody.push([assignedProgrammerResources[i]?.name || '', assignedQaResources[i]?.name || '']);
         }
         
         if (tableBody.length > 0) {
@@ -268,29 +316,21 @@ const App: React.FC = () => {
       .sort((a, b) => b.count - a.count);
 
     if (overUtilizedResources.length > 0) {
-      if (lastFinalY > 240) {
-        doc.addPage();
-        lastFinalY = 22;
-      }
+      if (lastFinalY > 240) { doc.addPage(); lastFinalY = 22; }
       doc.autoTable({
         head: [['Over-utilized Resources (> 3 Projects)', 'Role', 'Assignments']],
         body: overUtilizedResources.map(r => [r.name, r.type, r.count.toString()]),
-        startY: lastFinalY,
-        headStyles: { fillColor: [211, 84, 0] },
+        startY: lastFinalY, headStyles: { fillColor: [211, 84, 0] },
       });
       lastFinalY = doc.autoTable.previous.finalY;
     }
 
     if (unassignedResources.length > 0) {
-      if (lastFinalY > 250) {
-        doc.addPage();
-        lastFinalY = 22;
-      }
+      if (lastFinalY > 250) { doc.addPage(); lastFinalY = 22; }
       doc.autoTable({
         head: [['Unassigned Resources', '']],
         body: unassignedResources.map(r => [r.type, r.name]),
-        startY: lastFinalY + 10,
-        headStyles: { fillColor: [231, 76, 60] },
+        startY: lastFinalY + 10, headStyles: { fillColor: [231, 76, 60] },
       });
     }
 
@@ -338,8 +378,25 @@ const App: React.FC = () => {
 
       {hasData ? (
         <main className="flex flex-col lg:flex-row gap-8">
-          <ResourcePool programmers={programmers} qas={qas} projectManagers={projectManagers} assignments={assignments} onDrop={handleDrop} />
-          <ProjectBoard projects={projects} programmers={programmers} qas={qas} projectManagers={projectManagers} assignments={assignments} onDrop={handleDrop} />
+          <ResourcePool 
+            programmers={programmers} 
+            qas={qas} 
+            projectManagers={projectManagers}
+            projectLeads={projectLeads}
+            assignments={assignments} 
+            onDrop={handleDrop}
+            resourceProjectCounts={resourceProjectCounts}
+          />
+          <ProjectBoard 
+            projects={projects} 
+            programmers={programmers} 
+            qas={qas} 
+            projectManagers={projectManagers} 
+            projectLeads={projectLeads}
+            assignments={assignments} 
+            onDrop={handleDrop}
+            resourceProjectCounts={resourceProjectCounts}
+          />
         </main>
       ) : (
         <div className="text-center py-16 px-6 bg-gray-800 rounded-2xl shadow-lg border border-dashed border-gray-600">

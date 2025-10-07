@@ -2,24 +2,16 @@ import React, { useState } from 'react';
 import { Project, Resource, Assignments, ResourceType } from '../types';
 import DraggableResource from './DraggableResource';
 
-interface ProjectCardProps {
-  project: Project;
-  assignedProgrammers: Resource[];
-  assignedQas: Resource[];
-  assignedPms: Resource[];
-  resourceMap: Map<string, Resource>;
-  onDrop: (targetProjectId: string | null, targetResourceType: ResourceType) => (e: React.DragEvent<HTMLDivElement>) => void;
-}
-
 const DropColumn: React.FC<{
     title: string;
     resourceType: ResourceType;
-    projectId: string;
     assignedResources: Resource[];
-    onDrop: (targetProjectId: string | null, targetResourceType: ResourceType) => (e: React.DragEvent<HTMLDivElement>) => void;
-}> = ({ title, resourceType, projectId, assignedResources, onDrop }) => {
+    projectId: string;
+    onDrop: (e: React.DragEvent<HTMLDivElement>) => void;
+    resourceProjectCounts: Map<string, number>;
+    className?: string;
+}> = ({ title, resourceType, assignedResources, projectId, onDrop, resourceProjectCounts, className = '' }) => {
     const [isOver, setIsOver] = useState(false);
-    const [justDropped, setJustDropped] = useState(false);
 
     const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault();
@@ -36,108 +28,104 @@ const DropColumn: React.FC<{
 
     const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault();
-        const draggedType = e.dataTransfer.getData('resourceType');
-        if (draggedType === resourceType) {
-            onDrop(projectId, resourceType)(e);
-            setJustDropped(true);
-            setTimeout(() => setJustDropped(false), 400);
-        }
+        onDrop(e);
         setIsOver(false);
     };
 
-    const highlightRingColor = resourceType === ResourceType.PROGRAMMER 
-        ? 'ring-blue-500' 
-        : resourceType === ResourceType.QA
-        ? 'ring-green-500'
-        : 'ring-purple-500';
-
-    const highlightBgColor = resourceType === ResourceType.PROGRAMMER 
-        ? 'bg-blue-900/20' 
-        : resourceType === ResourceType.QA
-        ? 'bg-green-900/20'
-        : 'bg-purple-900/20';
+    const styleMap = {
+        [ResourceType.PROGRAMMER]: { ring: 'ring-blue-500', bg: 'bg-blue-900/20', text: 'text-blue-400' },
+        [ResourceType.QA]: { ring: 'ring-green-500', bg: 'bg-green-900/20', text: 'text-green-400' },
+        [ResourceType.PROJECT_MANAGER]: { ring: 'ring-purple-500', bg: 'bg-purple-900/20', text: 'text-purple-400' },
+        [ResourceType.PROJECT_LEAD]: { ring: 'ring-yellow-500', bg: 'bg-yellow-900/20', text: 'text-yellow-400' }
+    };
     
-    const textColor = resourceType === ResourceType.PROGRAMMER 
-        ? 'text-blue-400' 
-        : resourceType === ResourceType.QA
-        ? 'text-green-400'
-        : 'text-purple-400';
+    const { ring, bg, text } = styleMap[resourceType];
 
     return (
         <div
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
-            className={`flex-1 p-4 rounded-lg bg-gray-900/50 border-2 border-dashed border-gray-700 transition-all duration-200 min-h-[150px] ${
-                isOver 
-                ? `border-solid ${highlightRingColor} ${highlightBgColor} ring-2 ring-offset-gray-900`
-                : ''
-            } ${
-                justDropped ? 'bg-green-500/25' : ''
+            className={`flex flex-col flex-1 p-4 rounded-lg bg-gray-900/50 border-2 border-dashed border-gray-700 transition-all duration-200 ${className} ${
+                isOver ? `border-solid ${ring} ${bg}` : ''
             }`}
         >
-            <h4 className={`font-semibold mb-3 ${textColor}`}>{title} ({assignedResources.length})</h4>
-            {assignedResources.length > 0 ? (
-                assignedResources.map(resource => (
-                    <DraggableResource key={resource.id} resource={resource} type={resourceType} sourceProjectId={projectId} />
-                ))
-            ) : (
-                 <p className="text-gray-500 text-sm text-center pt-8">Drop here</p>
-            )}
+            <h4 className={`font-semibold mb-3 flex-shrink-0 ${text}`}>{title} ({assignedResources.length})</h4>
+            <div className="space-y-2 overflow-y-auto">
+                {assignedResources.map(resource => (
+                    <DraggableResource key={resource.id} resource={resource} type={resourceType} sourceProjectId={projectId} projectCount={resourceProjectCounts.get(resource.id) || 0} />
+                ))}
+            </div>
         </div>
     );
 };
 
+interface ProjectCardProps {
+  project: Project;
+  assignments: Assignments[string];
+  resourceMap: Map<string, Resource>;
+  onDrop: (target: { projectId: string | null; type: ResourceType }) => (e: React.DragEvent<HTMLDivElement>) => void;
+  resourceProjectCounts: Map<string, number>;
+}
 
-const ProjectCard: React.FC<ProjectCardProps> = ({ project, assignedProgrammers, assignedQas, assignedPms, resourceMap, onDrop }) => {
-  const projectLead = project.projectLeadId ? resourceMap.get(project.projectLeadId) : undefined;
-  const projectManager = assignedPms.length > 0 ? assignedPms[0] : undefined;
-  
+const ProjectCard: React.FC<ProjectCardProps> = ({ project, assignments, resourceMap, onDrop, resourceProjectCounts }) => {
+
+  const getAssignedResources = (type: ResourceType): Resource[] => {
+    return assignments[type].map(id => resourceMap.get(id)).filter((r): r is Resource => !!r);
+  };
+
+  const totalResources = Object.values(assignments).flat().length;
+
   return (
     <div className="bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-700">
-      <h3 className="text-xl font-bold mb-2 text-cyan-400">{project.name}</h3>
+      <h3 className="text-xl font-bold mb-4 text-cyan-400 flex items-center justify-between">
+        <span>{project.name}</span>
+        <span className="text-sm font-medium bg-gray-700 text-cyan-300 rounded-full px-3 py-1">
+          Total Resources: {totalResources}
+        </span>
+      </h3>
 
-      <div className="mb-4 space-y-1">
-        <p className="text-sm text-gray-400 flex items-baseline">
-            <span className="font-semibold text-gray-300 w-20 flex-shrink-0">Lead:</span>
-            {projectLead ? (
-                <span className="truncate">{projectLead.name}</span>
-            ) : (
-                <span className="text-yellow-500 italic">Not Assigned</span>
-            )}
-        </p>
-        <p className="text-sm text-gray-400 flex items-baseline">
-            <span className="font-semibold text-gray-300 w-20 flex-shrink-0">Manager:</span>
-            {projectManager ? (
-                <span className="truncate">{projectManager.name}</span>
-            ) : (
-                <span className="text-yellow-500 italic">Not Assigned</span>
-            )}
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <DropColumn 
-            title="Programmers"
-            resourceType={ResourceType.PROGRAMMER}
-            projectId={project.id}
-            assignedResources={assignedProgrammers}
-            onDrop={onDrop}
-        />
-        <DropColumn 
-            title="QA Engineers"
-            resourceType={ResourceType.QA}
-            projectId={project.id}
-            assignedResources={assignedQas}
-            onDrop={onDrop}
-        />
-        <DropColumn 
-            title="Project Manager"
-            resourceType={ResourceType.PROJECT_MANAGER}
-            projectId={project.id}
-            assignedResources={assignedPms}
-            onDrop={onDrop}
-        />
+      <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <DropColumn 
+                title="Project Managers"
+                resourceType={ResourceType.PROJECT_MANAGER}
+                assignedResources={getAssignedResources(ResourceType.PROJECT_MANAGER)}
+                onDrop={onDrop({ projectId: project.id, type: ResourceType.PROJECT_MANAGER })}
+                projectId={project.id}
+                resourceProjectCounts={resourceProjectCounts}
+                className="min-h-[120px]"
+            />
+            <DropColumn 
+                title="Project Leads"
+                resourceType={ResourceType.PROJECT_LEAD}
+                assignedResources={getAssignedResources(ResourceType.PROJECT_LEAD)}
+                onDrop={onDrop({ projectId: project.id, type: ResourceType.PROJECT_LEAD })}
+                projectId={project.id}
+                resourceProjectCounts={resourceProjectCounts}
+                className="min-h-[120px]"
+            />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+             <DropColumn 
+                title="Programmers"
+                resourceType={ResourceType.PROGRAMMER}
+                assignedResources={getAssignedResources(ResourceType.PROGRAMMER)}
+                onDrop={onDrop({ projectId: project.id, type: ResourceType.PROGRAMMER })}
+                projectId={project.id}
+                resourceProjectCounts={resourceProjectCounts}
+                className="min-h-[200px]"
+            />
+            <DropColumn 
+                title="QA Engineers"
+                resourceType={ResourceType.QA}
+                assignedResources={getAssignedResources(ResourceType.QA)}
+                onDrop={onDrop({ projectId: project.id, type: ResourceType.QA })}
+                projectId={project.id}
+                resourceProjectCounts={resourceProjectCounts}
+                className="min-h-[200px]"
+            />
+        </div>
       </div>
     </div>
   );
@@ -149,15 +137,18 @@ interface ProjectBoardProps {
   programmers: Resource[];
   qas: Resource[];
   projectManagers: Resource[];
+  projectLeads: Resource[];
   assignments: Assignments;
-  onDrop: (targetProjectId: string | null, targetResourceType: ResourceType) => (e: React.DragEvent<HTMLDivElement>) => void;
+  onDrop: (target: { projectId: string | null; type: ResourceType }) => (e: React.DragEvent<HTMLDivElement>) => void;
+  resourceProjectCounts: Map<string, number>;
 }
 
-const ProjectBoard: React.FC<ProjectBoardProps> = ({ projects, programmers, qas, projectManagers, assignments, onDrop }) => {
+const ProjectBoard: React.FC<ProjectBoardProps> = ({ projects, programmers, qas, projectManagers, projectLeads, assignments, onDrop, resourceProjectCounts }) => {
   const resourceMap = new Map<string, Resource>([
     ...programmers.map((p): [string, Resource] => [p.id, p]),
     ...qas.map((q): [string, Resource] => [q.id, q]),
     ...projectManagers.map((pm): [string, Resource] => [pm.id, pm]),
+    ...projectLeads.map((pl): [string, Resource] => [pl.id, pl]),
   ]);
 
   return (
@@ -167,19 +158,16 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({ projects, programmers, qas,
         {projects.length > 0 ? (
           projects.map(project => {
             const projectAssignments = assignments[project.id];
-            const assignedProgrammers = projectAssignments?.[ResourceType.PROGRAMMER].map(id => resourceMap.get(id)).filter((p): p is Resource => !!p) || [];
-            const assignedQas = projectAssignments?.[ResourceType.QA].map(id => resourceMap.get(id)).filter((q): q is Resource => !!q) || [];
-            const assignedPms = projectAssignments?.[ResourceType.PROJECT_MANAGER].map(id => resourceMap.get(id)).filter((pm): pm is Resource => !!pm) || [];
+            if (!projectAssignments) return null;
 
             return (
               <ProjectCard
                 key={project.id}
                 project={project}
-                assignedProgrammers={assignedProgrammers}
-                assignedQas={assignedQas}
-                assignedPms={assignedPms}
+                assignments={projectAssignments}
                 resourceMap={resourceMap}
                 onDrop={onDrop}
+                resourceProjectCounts={resourceProjectCounts}
               />
             );
           })
