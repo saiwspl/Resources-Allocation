@@ -1,0 +1,5 @@
+{
+  "name": "Project Resource Allocator",
+  "description": "A web application to manage project assignments for programmers and QA engineers by uploading CSV files and using drag-and-drop functionality.",
+  "requestFramePermissions": []
+}
